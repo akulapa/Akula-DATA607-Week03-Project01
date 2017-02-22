@@ -1,0 +1,183 @@
+---
+title: "Akula-DATA607-Week03-Project01"
+author: "Pavan Akula"
+date: "February 21, 2017"
+output: html_document
+---
+
+This project involves in reading *_Chess Tournament Cross Table_* and generating a CSV file with the following information for all of the players: Player's Name, Player's State, Total Number of Points, Player's Pre-Rating, and Average Pre Chess Rating of Opponents.
+
+Average Pre Chess Rating of Opponents is calculated as sum of pre-tournament opponents' ratings divided by total number of games played.
+
+Libraries used for this project.
+
+```{r , echo=TRUE}
+library(readr)      # used for reading the text file
+library(stringr)    # used for extracting text using regular expressions
+library(data.table) # used for saving out into tabel format
+library(sqldf)      # used for querying and to generate aggregate output
+library(utils)      # used for generating CSV file
+```
+
+Download and save the tournamentinfo.txt, to local working directory from website.
+https://bbhosted.cuny.edu/bbcswebdav/pid-28524631-dt-content-rid-126144833_1/courses/SPS01_DATA_607_01_1172_1/SPS01_DATA_607_01_1169_1_ImportedContent_20160815114002/SPS01_DATA_607_01_1162_1_ImportedContent_20160126062155/tournamentinfo.txt
+
+Load *_Chess Tournament Cross Table_* file. 
+
+```{r , echo=TRUE}
+# Get local directory and load the file
+
+localDir <- getwd()
+chessFile <- paste(str_trim(localDir),"//tournamentinfo.txt",sep="")
+
+# Skip top 3 lines as it contains header info
+
+chess.text<-read_lines(chessFile,skip = 3)
+head(chess.text,10)
+```
+
+There are total of 64 players. File needs formatting in order to perform calculations and generate CSV output.
+
+```{r , echo=TRUE}
+# First level of formatting removes hypen("-") characters
+
+chess.text.level1 <- gsub("-","",chess.text)
+head(chess.text.level1, 6)
+```
+
+```{r , echo=TRUE}
+# Second level of formatting removes empty lines
+# This makes a continous data without newline characters 
+
+chess.text.level2 <- paste(unlist(chess.text.level1), collapse = " ")
+head(chess.text.level2,10)
+```
+
+```{r , echo=TRUE}
+# Add extra characters at the end of text data. This helps read complete data. 
+# If extra characters are not added, last line will be skipped. 
+
+chess.text.level2 <- paste(chess.text.level2,"_*_*_*_")
+
+# Extract the text using pattern repeating 180 characters
+# Idea is to combine 2 lines of each player's info into single line
+# Once combined, information about single player takes 180 characters
+
+pattern <- "[[:print:]]{180}"
+chess.text.level3 <- unlist(str_extract_all(chess.text.level2, pattern = pattern))
+head(chess.text.level3,3)
+```
+
+```{r , echo=TRUE}
+# Each player has about 20 columns of information. Split the single string into 20 columns
+
+chess.data <- data.frame(unlist(str_split_fixed(chess.text.level3, "\\|", 21)))
+head(chess.data, 5)
+```
+
+```{r , echo=TRUE}
+# Using regular expressions extract the pre match rating for each player
+
+pattern = "(R:\\s+[[:digit:]]{3,4})"
+chess.preGameRating <- unlist(str_extract(string = chess.data[,12], pattern = pattern))
+
+# Get the pre-game rating
+pattern = "[[:digit:]]{3,4}"
+chess.preGameRating <- str_extract(string = chess.preGameRating, pattern = pattern)
+chess.preGameRating <- data.frame(chess.data, preGameRating = chess.preGameRating)
+
+head(chess.preGameRating, 5)
+
+```
+
+```{r , echo=TRUE}
+# Format the column type
+
+chess.preGameRating$X1 <- as.numeric(as.character(chess.preGameRating$X1))
+chess.preGameRating$preGameRating <- as.numeric(as.character(chess.preGameRating$preGameRating))
+
+```
+
+```{r , echo=TRUE}
+# Extract the information about opponent for each round
+# Opponent player info is set to "0" for all "NA" values
+
+pattern = "[[:digit:]]{1,2}"
+
+chess.preGameRating$G1opponent = ifelse(is.na(str_match(string = chess.preGameRating$X4, pattern = pattern)), 0, as.numeric(str_extract(string = chess.preGameRating$X4, pattern = pattern)))
+chess.preGameRating$G2opponent = ifelse(is.na(str_match(string = chess.preGameRating$X5, pattern = pattern)), 0, as.numeric(str_extract(string = chess.preGameRating$X5, pattern = pattern)))
+chess.preGameRating$G3opponent = ifelse(is.na(str_match(string = chess.preGameRating$X6, pattern = pattern)), 0, as.numeric(str_extract(string = chess.preGameRating$X6, pattern = pattern)))
+chess.preGameRating$G4opponent = ifelse(is.na(str_match(string = chess.preGameRating$X7, pattern = pattern)), 0, as.numeric(str_extract(string = chess.preGameRating$X7, pattern = pattern)))
+chess.preGameRating$G5opponent = ifelse(is.na(str_match(string = chess.preGameRating$X8, pattern = pattern)), 0, as.numeric(str_extract(string = chess.preGameRating$X8, pattern = pattern)))
+chess.preGameRating$G6opponent = ifelse(is.na(str_match(string = chess.preGameRating$X9, pattern = pattern)), 0, as.numeric(str_extract(string = chess.preGameRating$X9, pattern = pattern)))
+chess.preGameRating$G7opponent = ifelse(is.na(str_match(string = chess.preGameRating$X10, pattern = pattern)), 0, as.numeric(str_extract(string = chess.preGameRating$X10, pattern = pattern)))
+
+head(chess.preGameRating,10)
+```
+
+```{r, echo=TRUE}
+chessTable <- data.table(chess.preGameRating)
+
+chess.rating <- sqldf("SELECT ct1.*,SUM(ct2.preGameRating) AS sumOfOpponentPreGameRating,
+                          SUM(CASE WHEN ct1.G1opponent > 0 THEN 1 
+                          WHEN ct1.G2opponent > 0 THEN 1
+                          WHEN ct1.G3opponent > 0 THEN 1
+                          WHEN ct1.G4opponent > 0 THEN 1
+                          WHEN ct1.G5opponent > 0 THEN 1
+                          WHEN ct1.G6opponent > 0 THEN 1
+                          WHEN ct1.G7opponent > 0 THEN 1
+                          ELSE 0 END) AS numberOfGamesPlayed
+                      FROM chessTable ct1, chessTable ct2 
+                      WHERE ct2.X1 IN(ct1.G1opponent,ct1.G2opponent,ct1.G3opponent,ct1.G4opponent,ct1.G5opponent,ct1.G6opponent,ct1.G7opponent) GROUP BY ct1.X1")
+
+head(chess.rating,5)
+```
+
+```{r, echo=TRUE}
+# Average opponent pre game rating (rounded).  
+
+chess.rating$avgOppPreGameRating <- round(chess.rating$sumOfOpponentPreGameRating / chess.rating$numberOfGamesPlayed,0)
+head(chess.rating,10)
+```
+
+```{r, echo=TRUE}
+# Change column names to readable format
+
+names(chess.rating)[names(chess.rating) == "X1"] <- "playerNumber"
+names(chess.rating)[names(chess.rating) == "X2"] <- "playerName"
+names(chess.rating)[names(chess.rating) == "X11"] <- "playerState"
+names(chess.rating)[names(chess.rating) == "X3"] <- "playerPoints"
+names(chess.rating)[names(chess.rating) == "preGameRating"] <- "playerPreGameRating"
+
+
+# Format the column values remove extra spaces
+
+trim <- function (x) gsub("^\\s+|\\s+$", "", x)
+chess.rating$playerState <- trim(chess.rating$playerState)
+chess.rating$playerPoints <- trim(chess.rating$playerPoints)
+chess.rating$playerName <- trim(chess.rating$playerName)
+
+# Create subset of data to be written to CSV file
+
+chess.csvdata <- subset(chess.rating,select = c(playerNumber,playerName,playerState,playerPoints,playerPreGameRating,avgOppPreGameRating))
+
+head(chess.csvdata,10)
+```
+
+```{r, echo=TRUE}
+# Generate CSV files
+
+chessOutFile <- paste(str_trim(localDir),"//chessOutFile.csv",sep="")
+write.table(chess.csvdata, file = chessOutFile, row.names = FALSE, sep = ",")
+```
+
+
+
+References: 
+
+1. SQL from within R - https://github.com/ggrothendieck/sqldf#example-4-join
+
+2. Trim function - http://stackoverflow.com/questions/2261079/how-to-trim-leading-and-trailing-whitespace-in-r
+
+3. Regular expressions - Handling and Processing Strings in R, Gaston Sanchez
+
